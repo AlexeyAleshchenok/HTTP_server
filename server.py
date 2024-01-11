@@ -9,12 +9,22 @@ QUEUE_SIZE = 10
 IP = '0.0.0.0'
 PORT = 80
 SOCKET_TIMEOUT = 2
-DEFAULT_URL = '/html/index.html'
-MOVED_LOCATION = '/index.html'
+DEFAULT_URL = '/index.html'
 ROOT_WEB = 'C:/Users/User/PycharmProjects/HTTP_server/ROOT-WEB'
-BAD_REQUEST = b'HTTP/1.1 400 Bad Request\n\n<h1>400 Bad Request</h1>'
-NOT_FOUND = b'HTTP/1.1 404 Not Found\n\n<h1>404 Not Found</h1>'
+BAD_REQUEST = b'HTTP/1.1 400 Bad Request\n\n<h1>400 Bad Request</h1>\r\n\r\n'
+NOT_FOUND = b'HTTP/1.1 404 Not Found\n\n<h1>404 Not Found</h1>\r\n\r\n'
 OK = 'HTTP/1.1 200 OK\r\nContent-Type: '
+SPECIAL_STATUS = {'moved': b'HTTP/1.1 302 Moved Temporarily\r\nLocation: /index.html\r\n\r\n',
+                  'forbidden': b'HTTP/1.1 403 Forbidden\r\n\r\n<h1>403 Forbidden</h1>',
+                  'error': b'HTTP/1.1 500 Internal Server Error\r\n\r\n<h1>500 Internal Server Error</h1>'}
+FILE_TYPE = {'html': 'text/html;charset=utf-8\r\nContent-Length: ',
+             'css': 'text/css\r\nContent-Length: ',
+             'js': 'text/javascript; charset=UTF-8\r\nContent-Length: ',
+             'txt': 'text/plain\r\nContent-Length: '}
+IMAGE_TYPE = {'ico': 'image/x-icon\r\nContent-Length: ',
+              'gif': 'image/jpeg\r\nContent-Length: ',
+              'png': 'image/png\r\nContent-Length: ',
+              'jpg': 'image/jpeg\r\nContent-Length: '}
 
 
 def get_file_data(file_name):
@@ -38,59 +48,35 @@ def handle_client_request(resource, client_socket):
     :param client_socket: a socket for the communication with the client
     :return: None
     """
-    """ """
-    if resource == b'/':
+    folder = '/'
+    if resource == b'/' or b'':
         url = DEFAULT_URL
+    elif resource == b'/index.html':
+        url = resource.decode().split('/')[-1]
     else:
-        url = resource.decode()
+        folder += resource.decode().split('/')[1] + '/'
+        url = resource.decode().split('/')[-1]
 
-    if url == '/moved':
-        http_response = f'HTTP/1.1 302 Moved Temporarily\n\nLocation: {MOVED_LOCATION}\r\n'.encode()
-        client_socket.send(http_response)
-        return
-    if url == '/forbidden':
-        http_response = b'HTTP/1.1 403 Forbidden\n\n<h1>403 Forbidden</h1>'
-        client_socket.send(http_response)
-        return
-    if url == '/error':
-        http_response = b"HTTP/1.1 500 Internal Server Error\n\n<h1>500 Internal Server Error</h1>"
-        client_socket.send(http_response)
+    if url in SPECIAL_STATUS:
+        client_socket.send(SPECIAL_STATUS[url])
         return
 
-    file_type = url.split('/')[1]
-    if file_type == 'html':
-        http_header = OK + 'text/html;charset=utf-8\r\nContent-Length: '
-        url = '/' + url.split('/')[2]
-    elif file_type == 'css':
-        http_header = OK + 'text/css\r\nContent-Length: '
-    elif file_type == 'js':
-        http_header = OK + 'text/javascript; charset=UTF-8\r\nContent-Length: '
-    elif file_type == 'txt':
-        http_header = OK + 'text/plain\r\nContent-Length: '
-    elif file_type == 'imgs':
-        img_type = url.split('/')[2].split('.')[1]
-        if img_type == 'ico':
-            http_header = OK + 'image/x-icon\r\nContent-Length: '
-        elif img_type == 'gif':
-            http_header = OK + 'image/jpeg\r\nContent-Length: '
-        elif img_type == 'png':
-            http_header = OK + 'image/png\r\nContent-Length: '
-        elif img_type == 'jpg':
-            http_header = OK + 'image/jpeg\r\nContent-Length: '
-        else:
-            client_socket.sendall(NOT_FOUND)
-            return
+    file_type = url.split('.')[-1]
+    if folder == '/imgs/':
+        http_header = OK + IMAGE_TYPE[file_type]
+    elif file_type in FILE_TYPE:
+        http_header = OK + FILE_TYPE[file_type]
     else:
         client_socket.send(NOT_FOUND)
         return
 
-    filename = ROOT_WEB + url
+    filename = ROOT_WEB + folder + url
     data = get_file_data(filename)
     if data == b'':
         client_socket.sendall(NOT_FOUND)
     else:
         http_header += str(len(data))
-        client_socket.sendall(http_header.encode() + b'\n\n' + data)
+        client_socket.sendall(http_header.encode() + b'\r\n\r\n' + data)
 
 
 def validate_http_request(request):
@@ -106,7 +92,10 @@ def validate_http_request(request):
     if not sorted_request or not sorted_request[0].startswith(b'GET') or not sorted_request[0].endswith(b'HTTP/1.1'):
         validation = False
     else:
-        resource = sorted_request[0].split(b' ')[1]
+        try:
+            resource = sorted_request[0].split(b' ')[1]
+        except IndexError:
+            resource = b''
 
     return validation, resource
 
@@ -121,9 +110,11 @@ def handle_client(client_socket):
     print('Client connected')
     while True:
         try:
-            client_request = client_socket.recv(4096)
-            if not client_request:
-                break
+            client_request = b''
+            while True:
+                client_request += client_socket.recv(1024)
+                if client_request.endswith(b'\r\n\r\n') or client_request == b'':
+                    break
             valid_http, resource = validate_http_request(client_request)
             if valid_http:
                 print('Got a valid HTTP request')
